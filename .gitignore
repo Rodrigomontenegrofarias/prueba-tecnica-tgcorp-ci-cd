@@ -1,6 +1,9 @@
 .codex
 .DS_Store
 *.Zone.Identifier
+.env
+.env.*
+!.env.example
 
 app/node_modules/
 app/build/

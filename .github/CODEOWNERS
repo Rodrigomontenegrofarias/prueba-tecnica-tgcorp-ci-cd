@@ -1,12 +1,12 @@
 # Default owners for all files
-* @rodrigomontenegro
+* @Rodrigomontenegrofarias
 
 # Application source
-/app/src/** @rodrigomontenegro
-/app/public/** @rodrigomontenegro
+/app/src/** @Rodrigomontenegrofarias
+/app/public/** @Rodrigomontenegrofarias
 
 # CI/CD and repository governance
-/.github/** @rodrigomontenegro
-/Dockerfile @rodrigomontenegro
-/README.md @rodrigomontenegro
-/docs/** @rodrigomontenegro
+/.github/** @Rodrigomontenegrofarias
+/Dockerfile @Rodrigomontenegrofarias
+/README.md @Rodrigomontenegrofarias
+/docs/** @Rodrigomontenegrofarias

@@ -27,6 +27,11 @@ Configurar en `Settings > Branches > Add branch protection rule` con:
 - Ningún auto-merge sin checks verdes.
 - Al menos una revisión humana aprobada.
 - Si cambia CI/CD o gobernanza, requerir revisión de `CODEOWNERS`.
+- El despliegue productivo ocurre después del merge a `main`; el PR valida calidad, seguridad y build antes de habilitar ese paso.
+
+## Nota de operación
+
+- Si el repositorio tiene un solo colaborador, la exigencia de approvals reales requiere invitar a otra persona con permisos de revisión.
 
 ## Responsables (CODEOWNERS)
 
