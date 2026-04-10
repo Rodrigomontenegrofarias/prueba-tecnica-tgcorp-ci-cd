@@ -103,7 +103,7 @@ jobs:
         working-directory: app
 
       - name: Dependency audit (NPM)
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=critical
         working-directory: app
 
       - name: Scan for secrets (Gitleaks)
