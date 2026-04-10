@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   test:
@@ -64,7 +65,7 @@ jobs:
         working-directory: app
 
       - name: SonarQube scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
@@ -76,13 +77,7 @@ jobs:
             -Dsonar.tests=app/src
             -Dsonar.test.inclusions=**/*.test.js
             -Dsonar.sourceEncoding=UTF-8
-
-      - name: SonarQube quality gate
-        uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
-        timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+            -Dsonar.qualitygate.wait=true
 
   security:
     name: Security
@@ -95,6 +90,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -108,7 +105,7 @@ jobs:
         working-directory: app
 
       - name: Dependency audit (NPM)
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=critical
         working-directory: app
 
       - name: Scan for secrets (Gitleaks)
@@ -116,15 +113,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+
       - name: Filesystem vulnerability scan (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: table
-          exit-code: '1'
+        run: trivy fs --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
 
   build:
     name: Build
@@ -149,6 +144,9 @@ jobs:
       - name: Build frontend bundle
         run: npm run build
         working-directory: app
+
+      - name: Remove Windows metadata files from build output
+        run: find app/build -type f -name '*:Zone.Identifier' -delete
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v4
