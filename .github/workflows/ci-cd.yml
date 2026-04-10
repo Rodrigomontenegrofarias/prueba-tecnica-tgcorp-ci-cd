@@ -111,15 +111,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sudo sh -s -- -b /usr/local/bin
+
       - name: Filesystem vulnerability scan (Trivy)
-        uses: aquasecurity/trivy-action@v2
-        with:
-          scan-type: fs
-          scan-ref: .
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: table
-          exit-code: '1'
+        run: trivy fs --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
 
   build:
     name: Build
