@@ -1,0 +1,137 @@
+name: Required Approvers
+
+on:
+  pull_request:
+    branches: ["main"]
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: required-approvers-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  required-approvers-gate:
+    name: Required Approvers Gate
+    if: github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate required approvers
+        uses: actions/github-script@v7
+        env:
+          REQUIRED_APPROVERS: Rodrigomotnenegrofarias,RodrigoMontenegrofarias96
+        with:
+          script: |
+            const requiredApprovers = process.env.REQUIRED_APPROVERS
+              .split(",")
+              .map((login) => login.trim())
+              .filter(Boolean);
+
+            const pullRequest = context.payload.pull_request;
+
+            if (!pullRequest) {
+              core.setFailed("This workflow only supports pull request events.");
+              return;
+            }
+
+            if (pullRequest.draft) {
+              core.notice("Draft pull request detected. The gate will be enforced once the PR is ready for review.");
+              return;
+            }
+
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = pullRequest.number;
+            const headSha = pullRequest.head.sha;
+            const author = pullRequest.user.login.toLowerCase();
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            reviews.sort((left, right) => {
+              return new Date(left.submitted_at || left.created_at).getTime()
+                - new Date(right.submitted_at || right.created_at).getTime();
+            });
+
+            const activeApprovals = new Map();
+            const lastRelevantReview = new Map();
+
+            for (const review of reviews) {
+              const login = review.user?.login?.toLowerCase();
+
+              if (!login) {
+                continue;
+              }
+
+              if (review.state === "APPROVED") {
+                activeApprovals.set(login, review);
+                lastRelevantReview.set(login, review);
+                continue;
+              }
+
+              if (review.state === "CHANGES_REQUESTED" || review.state === "DISMISSED") {
+                activeApprovals.delete(login);
+                lastRelevantReview.set(login, review);
+              }
+            }
+
+            const satisfied = [];
+            const missing = [];
+
+            for (const approver of requiredApprovers) {
+              const approverKey = approver.toLowerCase();
+
+              if (approverKey === author) {
+                missing.push(`${approver}: is the PR author and cannot self-approve`);
+                continue;
+              }
+
+              const approval = activeApprovals.get(approverKey);
+
+              if (!approval) {
+                const lastReview = lastRelevantReview.get(approverKey);
+
+                if (lastReview) {
+                  missing.push(`${approver}: latest decisive review is ${lastReview.state}`);
+                } else {
+                  missing.push(`${approver}: approval not found`);
+                }
+
+                continue;
+              }
+
+              if (approval.commit_id !== headSha) {
+                missing.push(
+                  `${approver}: approval is for ${approval.commit_id.slice(0, 7)}, current head is ${headSha.slice(0, 7)}`
+                );
+                continue;
+              }
+
+              satisfied.push(`${approver}: approved ${headSha.slice(0, 7)}`);
+            }
+
+            await core.summary
+              .addHeading("Required approvers")
+              .addList(requiredApprovers)
+              .addHeading("Satisfied")
+              .addList(satisfied.length ? satisfied : ["None"])
+              .addHeading("Missing")
+              .addList(missing.length ? missing : ["None"])
+              .write();
+
+            if (missing.length > 0) {
+              core.setFailed(`Missing required approvals from: ${missing.join("; ")}`);
+              return;
+            }
+
+            core.info("All required approvers have approved the current PR head.");
