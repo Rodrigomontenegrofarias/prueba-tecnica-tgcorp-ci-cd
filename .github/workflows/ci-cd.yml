@@ -1,0 +1,196 @@
+name: CI-CD
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Run unit tests
+        run: npm run test:ci
+        working-directory: app
+
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Lint
+        run: npm run lint
+        working-directory: app
+
+      - name: Build frontend bundle
+        run: npm run build
+        working-directory: app
+
+      - name: SonarQube scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
+            -Dsonar.sources=app/src
+            -Dsonar.tests=app/src
+            -Dsonar.test.inclusions=**/*.test.js
+            -Dsonar.sourceEncoding=UTF-8
+
+      - name: SonarQube quality gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1.2.0
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL || 'https://sonarcloud.io' }}
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Dependency audit (NPM)
+        run: npm audit --audit-level=high
+        working-directory: app
+
+      - name: Scan for secrets (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Filesystem vulnerability scan (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: '1'
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [quality, security]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Build frontend bundle
+        run: npm run build
+        working-directory: app
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: app/build
+          if-no-files-found: error
+
+      - name: Build Docker image
+        run: docker build --build-arg APP_VERSION=${{ github.sha }} -t prueba-tecnica-tgcorp-ci-cd:${{ github.sha }} .
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.ENABLE_NETLIFY_DEPLOY == 'true'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: deploy-dist
+
+      - name: Install Netlify CLI
+        run: npm install -g netlify-cli
+
+      - name: Deploy to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: |
+          netlify deploy \
+            --dir=deploy-dist \
+            --prod \
+            --site "$NETLIFY_SITE_ID" \
+            --auth "$NETLIFY_AUTH_TOKEN" \
+            --message "GitHub Actions deploy ${GITHUB_SHA}"

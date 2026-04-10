@@ -1,0 +1,10 @@
+.codex
+.DS_Store
+*.Zone.Identifier
+
+app/node_modules/
+app/build/
+app/.DS_Store
+
+coverage/
+dist/
